@@ -1,0 +1,97 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Baloo+2:wght@500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  background-color: #fbfaf6;
+  color: #14532d;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #bbf7d0;
+  border-radius: 999px;
+  border: 2px solid #fbfaf6;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #86efac;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl bg-white shadow-card border border-brand-100/60;
+  }
+  .card-soft {
+    @apply rounded-2xl bg-white/80 backdrop-blur-sm shadow-soft border border-brand-100/50;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+  .section-title {
+    @apply font-display text-xl font-bold text-brand-800;
+  }
+  .nav-item {
+    @apply flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition-all duration-200;
+  }
+  .nav-item-active {
+    @apply bg-brand-600 text-white shadow-soft;
+  }
+  .nav-item-idle {
+    @apply text-brand-700/70 hover:bg-brand-100 hover:text-brand-800;
+  }
+}
+
+/* Freshness meter gradient */
+.freshness-fill {
+  background: linear-gradient(90deg, #4ade80, #22c55e, #16a34a);
+}
+
+/* Map truck animation along route */
+.truck-route {
+  offset-path: path('M 20 180 C 80 120, 160 220, 240 140 S 360 80, 420 120');
+  offset-rotate: auto;
+  animation: drive 6s linear infinite;
+}
+
+@keyframes drive {
+  0% { offset-distance: 0%; }
+  100% { offset-distance: 100%; }
+}
+
+/* Subtle floating */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+
+/* Bar chart grow */
+.bar-grow {
+  transform-origin: bottom;
+  animation: grow-bar 0.7s ease-out both;
+}
+@keyframes grow-bar {
+  0% { transform: scaleY(0); }
+  100% { transform: scaleY(1); }
+}
