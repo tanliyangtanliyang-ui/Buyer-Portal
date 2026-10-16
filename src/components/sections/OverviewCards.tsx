@@ -2,7 +2,7 @@ import { ClipboardList, Truck, Leaf, Package, ArrowRight, Loader2 } from 'lucide
 import { Sparkline, TrendIndicator, Badge } from '@/components/ui';
 import type { PageId } from '@/components/Sidebar';
 import { useLiveData, useLiveSingle } from '@/lib/useLiveData';
-import { BUYER_CODE } from '@/lib/supabase';
+import { BUYER_CODE } from '@/lib/local';
 import type { Order, Route, Buyer } from '@/lib/types';
 
 const iconMap: Record<string, React.ElementType> = {

@@ -2,7 +2,7 @@ import { MapPin, Clock, Package, Award, BadgeCheck, Truck, Plus, Loader2, Check 
 import { FreshnessMeter, SectionHeader, Badge } from '@/components/ui';
 import { useLiveData } from '@/lib/useLiveData';
 import { useEvents } from '@/lib/eventBus';
-import { supabase, BUYER_CODE } from '@/lib/supabase';
+import { BUYER_CODE } from '@/lib/local';
 import { useState } from 'react';
 import type { Batch, Farmer } from '@/lib/types';
 
@@ -16,27 +16,14 @@ export default function ProduceMarketplace() {
     const farmer = (batch as any).farmers as Farmer | null;
     setOrderingId(batch.id);
     try {
-      // Create order in shared DB
-      const { data: buyer } = await supabase.from('buyers').select('id').eq('code', BUYER_CODE).maybeSingle();
       const orderCode = `ORD-${Math.floor(2000 + Math.random() * 800)}`;
-      const { data: newOrder } = await supabase.from('orders').insert({
-        code: orderCode,
-        buyer_id: buyer?.id ?? null,
-        farmer_id: batch.farmer_id,
-        batch_id: batch.id,
-        product: batch.product,
-        quantity_kg: Math.min(100, batch.available_kg),
-        price_per_kg: batch.price_per_kg,
-        status: 'Processing',
-        freshness: batch.freshness,
-      }).select('*').single();
 
       // Publish cross-module event — Buyer Portal → system
       await publish({
         event_type: 'order_placed',
         source_module: 'Buyer Portal',
         entity_type: 'order',
-        entity_id: newOrder?.id ?? null,
+        entity_id: null,
         entity_code: orderCode,
         payload: { order_code: orderCode, batch_code: batch.code, product: batch.product, buyer: BUYER_CODE, farmer: farmer?.code },
         severity: 'success',

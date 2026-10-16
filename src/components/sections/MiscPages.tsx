@@ -1,7 +1,7 @@
 import { useLiveData, useLiveSingle } from '@/lib/useLiveData';
 import { FreshnessMeter, Badge, SectionHeader, ProgressBar } from '@/components/ui';
 import { Search, Filter, Package, AlertTriangle, Loader2 } from 'lucide-react';
-import { BUYER_CODE } from '@/lib/supabase';
+import { BUYER_CODE } from '@/lib/local';
 import type { Order, Buyer, Batch } from '@/lib/types';
 
 const statusTone: Record<string, 'green' | 'amber' | 'blue' | 'gray'> = {

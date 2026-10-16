@@ -1,6 +1,6 @@
 import { SectionHeader } from '@/components/ui';
 import { useLiveSingle } from '@/lib/useLiveData';
-import { BUYER_CODE } from '@/lib/supabase';
+import { BUYER_CODE } from '@/lib/local';
 import { PackageCheck, Leaf, CloudOff, Sprout, Recycle, TreePine, Loader2 } from 'lucide-react';
 import type { SustainabilityMetric, Buyer } from '@/lib/types';
 
