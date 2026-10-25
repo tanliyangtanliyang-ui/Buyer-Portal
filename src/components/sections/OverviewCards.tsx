@@ -1,117 +1,35 @@
 import { ClipboardList, Truck, Leaf, Package, ArrowRight, Loader2 } from 'lucide-react';
-import { Sparkline, TrendIndicator, Badge } from '@/components/ui';
 import type { PageId } from '@/components/Sidebar';
-import { useLiveData, useLiveSingle } from '@/lib/useLiveData';
-import { BUYER_CODE } from '@/lib/local';
-import type { Order, Route, Buyer } from '@/lib/types';
+import { useBuyerInsights, kg, pctText, isOpenOrder } from '@/lib/insights';
 
-const iconMap: Record<string, React.ElementType> = {
-  ClipboardList,
-  Truck,
-  Leaf,
-  Package,
-};
-
+// Dashboard cards from this buyer's own records (live orders + dataset delivery history). No made-up trends.
 export default function OverviewCards({ setPage }: { setPage: (p: PageId) => void }) {
-  const { data: buyer } = useLiveSingle<Buyer>('buyers', '*', { code: BUYER_CODE });
-  const buyerId = buyer?.id;
-  const { data: orders, loading: lOrders } = useLiveData<Order>(
-    'orders',
-    '*',
-    (q: any) => (buyerId ? q.eq('buyer_id', buyerId) : q)
-  );
-  const { data: routes } = useLiveData<Route>('routes', '*');
-
-  const activeOrders = orders?.filter((o) => o.status !== 'Delivered') ?? [];
-  const incoming = routes?.filter((r) => r.status === 'In Transit') ?? [];
-  const avgFreshness = routes && routes.length > 0
-    ? Math.round(routes.reduce((s, r) => s + r.freshness, 0) / routes.length)
-    : 95;
-  const monthlyVolume = orders?.reduce((s, o) => s + o.quantity_kg, 0) ?? 8450;
+  const { data, error, loading } = useBuyerInsights();
+  const live = data?.live; const k = data?.deliveries.kpis;
+  const outForDelivery = live?.orders.filter((o) => ['dispatched', 'in_transit'].includes(o.progress?.stage ?? '')).length ?? 0;
+  const freshOpen = live?.orders.filter(isOpenOrder).flatMap((o) => o.lines).filter((l) => l.freshness.state === 'fresh').length ?? 0;
 
   const cards = [
-    {
-      id: 'orders',
-      label: 'Active Orders',
-      value: lOrders ? '…' : String(activeOrders.length || 12),
-      sub: `${orders?.filter((o) => o.status === 'Processing').length ?? 0} awaiting confirmation`,
-      icon: 'ClipboardList',
-      trend: 'up' as const,
-      trendValue: '+2 this week',
-      badge: 'On track',
-      badgeTone: 'green' as const,
-      spark: [4, 6, 5, 7, 6, 8, 10, activeOrders.length || 12],
-      target: 'orders' as PageId,
-    },
-    {
-      id: 'deliveries',
-      label: 'Incoming Deliveries',
-      value: lOrders ? '…' : `${incoming.length || 5} trucks`,
-      sub: `${incoming.filter((r) => r.eta_minutes < 60).length} arriving soon`,
-      icon: 'Truck',
-      trend: 'up' as const,
-      trendValue: '+1 vs yesterday',
-      badge: 'In transit',
-      badgeTone: 'blue' as const,
-      spark: [2, 3, 3, 4, 3, 5, 4, incoming.length || 5],
-      target: 'tracking' as PageId,
-    },
-    {
-      id: 'freshness',
-      label: 'Average Freshness Score',
-      value: lOrders ? '…' : `${avgFreshness}%`,
-      sub: 'Across all shipments',
-      icon: 'Leaf',
-      trend: 'up' as const,
-      trendValue: '+3% vs last month',
-      badge: 'Excellent',
-      badgeTone: 'green' as const,
-      spark: [88, 90, 89, 92, 91, 93, 94, avgFreshness],
-      target: 'freshness' as PageId,
-    },
-    {
-      id: 'volume',
-      label: 'Monthly Purchase Volume',
-      value: lOrders ? '…' : `${monthlyVolume.toLocaleString()} kg`,
-      sub: 'Of fresh produce',
-      icon: 'Package',
-      trend: 'up' as const,
-      trendValue: '+640 kg vs last month',
-      badge: 'Growing',
-      badgeTone: 'amber' as const,
-      spark: [5200, 6100, 5800, 6900, 7300, 7600, 8100, monthlyVolume],
-      target: 'reports' as PageId,
-    },
+    { id: 'orders', label: 'Orders in progress', value: live ? String(live.totals.open) : '…', sub: live ? `${live.totals.orders} placed in the portal · ${kg(live.totals.kg)}` : '', icon: ClipboardList, target: 'orders' as PageId },
+    { id: 'tracking', label: 'Out for delivery', value: live ? String(outForDelivery) : '…', sub: 'driver assigned or on the way', icon: Truck, target: 'tracking' as PageId },
+    { id: 'freshness', label: 'Open order lines still fresh', value: live ? String(freshOpen) : '…', sub: 'more than half the shelf life left', icon: Leaf, target: 'freshness' as PageId },
+    { id: 'history', label: 'On-time deliveries (history)', value: k ? pctText(k.on_time_pct) : '…', sub: k ? `${k.deliveries} deliveries · ${kg(k.delivered_kg)} (dataset) · failed or rejected count as missed` : '', icon: Package, target: 'tracking' as PageId },
   ];
 
+  if (error) return <div className="card p-4 text-sm text-red-700 bg-red-50" role="alert">Could not load your records: {error}</div>;
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-      {cards.map((c, i) => {
-        const Icon = iconMap[c.icon] ?? Package;
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4" data-testid="overview-cards">
+      {cards.map((c) => {
+        const Icon = c.icon;
         return (
-          <div
-            key={c.id}
-            className="card p-5 hover:shadow-pop transition-all duration-300 hover:-translate-y-0.5 animate-fade-up cursor-pointer group"
-            style={{ animationDelay: `${i * 70}ms` }}
-            onClick={() => setPage(c.target)}
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div className="w-11 h-11 rounded-2xl bg-brand-50 flex items-center justify-center group-hover:bg-brand-100 transition">
-                {lOrders ? <Loader2 className="w-5 h-5 text-brand-400 animate-spin" /> : <Icon className="w-[22px] h-[22px] text-brand-600" />}
-              </div>
-              <Badge tone={c.badgeTone}>{c.badge}</Badge>
+          <button key={c.id} type="button" onClick={() => setPage(c.target)} className="card p-5 text-left hover:shadow-pop transition-all duration-300 group">
+            <div className="w-11 h-11 rounded-2xl bg-brand-50 flex items-center justify-center mb-3 group-hover:bg-brand-100 transition">
+              {loading ? <Loader2 className="w-5 h-5 text-brand-400 animate-spin" /> : <Icon className="w-[22px] h-[22px] text-brand-600" />}
             </div>
             <p className="text-xs font-semibold text-brand-600/60 uppercase tracking-wide">{c.label}</p>
             <p className="font-display text-2xl font-extrabold text-brand-900 mt-1">{c.value}</p>
-            <p className="text-xs text-brand-500 mt-0.5">{c.sub}</p>
-            <div className="mt-3">
-              <Sparkline data={c.spark} />
-            </div>
-            <div className="mt-2 flex items-center justify-between">
-              <TrendIndicator trend={c.trend} value={c.trendValue} />
-              <ArrowRight className="w-4 h-4 text-brand-400 group-hover:text-brand-600 group-hover:translate-x-0.5 transition" />
-            </div>
-          </div>
+            <p className="text-xs text-brand-500 mt-0.5 flex items-center justify-between gap-2">{c.sub}<ArrowRight className="w-4 h-4 text-brand-400 shrink-0" /></p>
+          </button>
         );
       })}
     </div>

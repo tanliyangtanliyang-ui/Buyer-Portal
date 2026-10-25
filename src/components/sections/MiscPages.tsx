@@ -1,42 +1,83 @@
 import { useLiveData, useLiveSingle } from '@/lib/useLiveData';
+import { useCallback, useEffect, useState } from 'react';
+import { api, BUYER_ID, errText, loadBuyerProfile, initials, type BuyerProfile, type LiveOrder, type OrderStatus } from '@/lib/liveApi';
 import { FreshnessMeter, Badge, SectionHeader, ProgressBar } from '@/components/ui';
 import { Search, Filter, Package, AlertTriangle, Loader2 } from 'lucide-react';
 import { BUYER_CODE } from '@/lib/local';
 import type { Order, Buyer, Batch } from '@/lib/types';
 
-const statusTone: Record<string, 'green' | 'amber' | 'blue' | 'gray'> = {
-  Delivered: 'green',
-  'In Transit': 'blue',
-  Processing: 'amber',
-  Scheduled: 'gray',
+// My Orders: buyer orders saved through the FarmXpress API (POST /v1/live/orders). Status changes are
+// recorded by the API; nothing here is kept only in component state.
+const ORDER_STATUS: Record<OrderStatus, { label: string; tone: 'green' | 'amber' | 'blue' | 'red' | 'gray' }> = {
+  placed: { label: 'Placed · awaiting hub review', tone: 'amber' },
+  accepted: { label: 'Approved by hub', tone: 'blue' },
+  ready_for_pickup: { label: 'Prepared · ready for dispatch', tone: 'green' },
+  rejected: { label: 'Rejected by hub', tone: 'red' },
+  cancelled: { label: 'Cancelled', tone: 'gray' },
 };
 
+// One badge for where the order is now; delivered orders no longer show "Approved by hub" (scenario finding 3).
+function progressTone(o: LiveOrder): 'green' | 'amber' | 'blue' | 'red' | 'gray' {
+  const st = o.progress?.stage;
+  if (!st) return ORDER_STATUS[o.status].tone;
+  if (st === 'delivered') return 'green';
+  if (st === 'rejected') return 'red';
+  if (st === 'cancelled') return 'gray';
+  if (['partial_awaiting_decision', 'failed_awaiting_decision', 'closed_short', 'partial', 'redelivery_planned', 'placed'].includes(st)) return 'amber';
+  return 'blue';
+}
+
 export function OrdersPage() {
-  const { data: buyer } = useLiveSingle<Buyer>('buyers', '*', { code: BUYER_CODE });
-  const { data: orders, loading } = useLiveData<Order>(
-    'orders',
-    '*',
-    (q: any) => (buyer ? q.eq('buyer_id', buyer.id).order('created_at', { ascending: false }) : q)
-  );
+  const [orders, setOrders] = useState<LiveOrder[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [status, setStatus] = useState<'all' | OrderStatus>('all');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    setError(null);
+    api<{ orders: LiveOrder[] }>(`/live/orders?buyer=${BUYER_ID}`).then((r) => setOrders(r.orders)).catch((e) => { setOrders(null); setError(errText(e)); });
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  // Pick up hub decisions without a manual reload (keeps the last list if a poll fails).
+  useEffect(() => {
+    const t = setInterval(() => { api<{ orders: LiveOrder[] }>(`/live/orders?buyer=${BUYER_ID}`).then((r) => setOrders(r.orders)).catch(() => undefined); }, 20_000);
+    return () => clearInterval(t);
+  }, []);
+  const cancel = async (o: LiveOrder) => {
+    setBusy(o.order_id); setActionError(null);
+    try { await api(`/live/orders/${o.order_id}/transition`, { role: 'buyer', actor_id: BUYER_ID, to: 'cancelled' }); }
+    catch (e) { setActionError(`${o.order_id}: ${errText(e)}`); }
+    finally { setBusy(null); load(); }
+  };
+  const q = query.trim().toLowerCase();
+  const shown = (orders ?? []).filter((o) => (status === 'all' || o.status === status) && (!q || `${o.order_id} ${o.seller_name} ${o.lines.map((l) => l.product_name).join(' ')}`.toLowerCase().includes(q)));
 
   return (
     <div className="space-y-6">
-      <SectionHeader title="My Orders" subtitle="Manage and track all your purchase orders — synced in real time" />
+      <SectionHeader title="My Orders" subtitle={`Orders placed by buyer ${BUYER_ID}, saved in the FarmXpress API`} />
       <div className="card overflow-hidden">
-        <div className="flex items-center gap-3 p-4 border-b border-brand-50">
-          <div className="flex items-center gap-2 rounded-xl bg-brand-50 px-3 py-2 flex-1 max-w-xs">
+        <div className="flex flex-wrap items-center gap-3 p-4 border-b border-brand-50">
+          <div className="flex items-center gap-2 rounded-xl bg-brand-50 px-3 py-2 flex-1 min-w-[180px] max-w-xs">
             <Search className="w-4 h-4 text-brand-400" />
-            <input placeholder="Search orders…" className="bg-transparent outline-none text-sm w-full text-brand-800 placeholder:text-brand-400" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search orders…" aria-label="Search orders" className="bg-transparent outline-none text-sm w-full text-brand-800 placeholder:text-brand-400" />
           </div>
-          <button className="flex items-center gap-1.5 rounded-xl bg-white border border-brand-100 px-3 py-2 text-sm font-semibold text-brand-600 hover:bg-brand-50">
-            <Filter className="w-4 h-4" /> Filter
-          </button>
+          <label className="flex items-center gap-1.5 rounded-xl bg-white border border-brand-100 px-3 py-2 text-sm font-semibold text-brand-600">
+            <Filter className="w-4 h-4" />
+            <select value={status} onChange={(e) => setStatus(e.target.value as 'all' | OrderStatus)} className="bg-transparent outline-none" aria-label="Filter by status">
+              <option value="all">All statuses</option>
+              {(Object.keys(ORDER_STATUS) as OrderStatus[]).map((s) => <option key={s} value={s}>{ORDER_STATUS[s].label}</option>)}
+            </select>
+          </label>
+          <button type="button" onClick={load} className="rounded-xl bg-white border border-brand-100 px-3 py-2 text-sm font-semibold text-brand-600 hover:bg-brand-50">Refresh</button>
         </div>
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-brand-400">
-            <Loader2 className="w-6 h-6 animate-spin" />
-          </div>
-        ) : (
+        {error && <div role="alert" className="m-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">Orders could not be loaded: {error}. <button type="button" onClick={load} className="underline font-semibold">Retry</button></div>}
+        {actionError && <div role="alert" className="m-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">Could not cancel {actionError}</div>}
+        {orders === null && !error ? (
+          <div className="flex items-center justify-center py-16 text-brand-400"><Loader2 className="w-6 h-6 animate-spin" /></div>
+        ) : orders !== null && shown.length === 0 ? (
+          <p className="p-6 text-sm text-brand-600">{orders.length === 0 ? 'No orders yet. Place one from Browse Produce.' : 'No orders match this search.'}</p>
+        ) : orders !== null && (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -45,19 +86,33 @@ export function OrdersPage() {
                   <th className="px-4 py-3">Product</th>
                   <th className="px-4 py-3">Quantity</th>
                   <th className="px-4 py-3">Date</th>
-                  <th className="px-4 py-3">Freshness</th>
+                  <th className="px-4 py-3">Farmer · Hub</th>
+                  <th className="px-4 py-3 text-right">Total</th>
                   <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
-                {orders?.map((o) => (
-                  <tr key={o.id} className="border-t border-brand-50 hover:bg-brand-50/40 transition">
-                    <td className="px-4 py-3 font-bold text-brand-700 font-mono">{o.code}</td>
-                    <td className="px-4 py-3 font-semibold text-brand-800">{o.product}</td>
-                    <td className="px-4 py-3 text-brand-600">{o.quantity_kg} kg</td>
-                    <td className="px-4 py-3 text-brand-500">{o.order_date}</td>
-                    <td className="px-4 py-3 w-32"><FreshnessMeter value={o.freshness} /></td>
-                    <td className="px-4 py-3"><Badge tone={statusTone[o.status] ?? 'gray'}>{o.status}</Badge></td>
+                {shown.map((o) => (
+                  <tr key={o.order_id} className="border-t border-brand-50 hover:bg-brand-50/40 transition align-top" data-order-id={o.order_id}>
+                    <td className="px-4 py-3 font-bold text-brand-700 font-mono">{o.order_id}</td>
+                    <td className="px-4 py-3 font-semibold text-brand-800">{o.lines.map((l) => l.product_name).join(', ')}</td>
+                    <td className="px-4 py-3 text-brand-600">{o.total_kg} kg</td>
+                    <td className="px-4 py-3 text-brand-500">{o.created_at.slice(0, 10)}</td>
+                    <td className="px-4 py-3 text-brand-600">{o.seller_name} <span className="font-mono text-xs">({o.seller_farmer_id})</span><br /><span className="text-xs">{o.hub_name}</span></td>
+                    <td className="px-4 py-3 text-right font-semibold text-brand-800">RM {(o.subtotal_sen / 100).toFixed(2)}</td>
+                    <td className="px-4 py-3"><Badge tone={progressTone(o)}>{o.progress?.label ?? ORDER_STATUS[o.status].label}</Badge>
+                      {o.status === 'rejected' && <p className="mt-1 text-[11px] text-red-600">Reason: {o.decision_reason ?? 'not given'}</p>}
+                      {o.delivery.fulfilment && (
+                        <div className="mt-1 text-[11px]" data-testid={`buyer-delivery-${o.order_id}`}>
+                          <p className={`font-semibold ${o.delivery.fulfilment.outstanding_qty ? 'text-red-600' : 'text-brand-700'}`}>{o.delivery.fulfilment.status_label} ({o.delivery.fulfilment.delivered_qty} of {o.delivery.fulfilment.delivered_qty + o.delivery.fulfilment.outstanding_qty} kg)</p>
+                          {o.delivery.fulfilment.pods.map((p) => <p key={p.pod_id} className="text-brand-500">{p.pod_id}: {p.outcome} · {p.delivered_qty} kg · {new Date(p.delivered_at).toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur' })}{p.recipient_name ? ` · received by ${p.recipient_name}` : ''}{p.reason_label ? ` · ${p.reason_label}` : ''} · condition {p.produce_condition.replace(/_/g, ' ')}{p.decision?.status === 'resolved' ? ` · hub: ${p.decision.resolution === 'redeliver' ? 're-delivery planned' : 'closed without re-delivery'} (${p.decision.note})` : p.decision ? ' · awaiting hub decision' : ''}</p>)}
+                        </div>
+                      )}
+                      <p className="mt-1 text-[11px] text-brand-500">{o.delivery.fulfilment && (o.delivery.status !== 'dispatched' && o.delivery.status !== 'in_transit') ? '' : o.delivery.shipment_id
+                        ? `${o.delivery.status === 'in_transit' ? 'In transit' : 'Dispatched'} on ${o.delivery.shipment_id} · driver ${o.delivery.driver_name ?? o.delivery.driver_id} · ${o.delivery.vehicle_id}${o.delivery.eta_at ? ` · estimated arrival ${new Date(o.delivery.eta_at).toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur' })}` : ''}`
+                        : o.delivery.status === 'awaiting_hub_allocation' ? 'Awaiting dispatch (no shipment yet)' : o.delivery.status === 'not_required' ? 'No delivery' : 'Delivery not scheduled yet'}</p></td>
+                    <td className="px-4 py-3">{o.status === 'placed' && <button type="button" disabled={busy === o.order_id} onClick={() => cancel(o)} className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50">{busy === o.order_id ? 'Cancelling…' : 'Cancel'}</button>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -185,12 +240,14 @@ export function ReportsPage() {
 }
 
 export function SettingsPage() {
-  const { data: buyer, loading } = useLiveSingle<Buyer>('buyers', '*', { code: BUYER_CODE });
-
+  const [buyer, setBuyer] = useState<BuyerProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { loadBuyerProfile().then((b) => { setBuyer(b); setLoading(false); }); }, []);
+  const notRecorded = 'Not recorded in the FarmXpress dataset';
   return (
     <div className="space-y-6">
-      <SectionHeader title="Account Settings" subtitle="Manage your buyer profile and preferences" />
-      <div className="card p-6 max-w-2xl">
+      <SectionHeader title="Account Settings" subtitle="Your buyer profile as recorded in FarmXpress" />
+      <div className="card p-6 max-w-2xl" data-testid="buyer-settings">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-brand-400">
             <Loader2 className="w-6 h-6 animate-spin" />
@@ -199,29 +256,30 @@ export function SettingsPage() {
           <>
             <div className="flex items-center gap-4 mb-6">
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white text-xl font-extrabold">
-                {buyer?.name?.slice(0, 2).toUpperCase() ?? 'FM'}
+                {initials(buyer?.name)}
               </div>
               <div>
-                <h3 className="font-display font-bold text-brand-900">{buyer?.name ?? 'FreshMart Central'}</h3>
-                <p className="text-sm text-brand-500">{buyer?.type ?? 'Supermarket'} · <span className="font-mono">{buyer?.code ?? 'BUY-001'}</span></p>
+                <h3 className="font-display font-bold text-brand-900">{buyer?.name ?? BUYER_ID}</h3>
+                <p className="text-sm text-brand-500">{buyer?.type ?? 'Buyer'} · <span className="font-mono">{BUYER_ID}</span></p>
               </div>
             </div>
+            {!buyer && <p role="alert" className="mb-4 text-sm text-red-600">Buyer profile could not be loaded from the FarmXpress API.</p>}
             <div className="grid sm:grid-cols-2 gap-4">
               {[
-                { l: 'Business Name', v: buyer?.name ?? 'FreshMart Central' },
-                { l: 'Contact Person', v: buyer?.contact_person ?? 'Aisyah Rahman' },
-                { l: 'Email', v: buyer?.email ?? 'orders@freshmart.my' },
-                { l: 'Phone', v: buyer?.phone ?? '+60 3-2200 1100' },
-                { l: 'Delivery Address', v: buyer?.address ?? 'Jalan Ampang, KL' },
-                { l: 'Account Type', v: buyer?.type ?? 'Enterprise Buyer' },
+                { l: 'Business name', v: buyer?.name ?? '—' },
+                { l: 'Buyer type', v: buyer?.type ?? '—' },
+                { l: 'State', v: buyer?.state ?? '—' },
+                { l: 'Usual hub', v: buyer?.primary_hub_id ?? '—' },
+                { l: 'Contact person', v: notRecorded },
+                { l: 'Email / phone', v: notRecorded },
               ].map((f) => (
                 <div key={f.l}>
                   <label className="text-xs font-semibold text-brand-500 uppercase tracking-wide">{f.l}</label>
-                  <input defaultValue={f.v} className="mt-1 w-full rounded-xl bg-brand-50/50 border border-brand-100 px-3 py-2.5 text-sm font-semibold text-brand-800 outline-none focus:border-brand-400 focus:bg-white transition" />
+                  <input value={f.v} readOnly aria-readonly="true" className="mt-1 w-full rounded-xl bg-brand-50/50 border border-brand-100 px-3 py-2.5 text-sm font-semibold text-brand-800 outline-none" />
                 </div>
               ))}
             </div>
-            <button className="mt-5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white px-5 py-2.5 text-sm font-semibold transition">Save Changes</button>
+            <p className="mt-5 text-xs text-brand-500">Account details come from the FarmXpress dataset and are read-only in this prototype.</p>
           </>
         )}
       </div>

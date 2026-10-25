@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/farmer", "destination": "https://farmer-portal-cyan.vercel.app/farmer/" },
+    { "source": "/farmer/:path*", "destination": "https://farmer-portal-cyan.vercel.app/farmer/:path*" }
+  ]
+}
